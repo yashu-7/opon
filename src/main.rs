@@ -18,5 +18,9 @@ Your productivity, your knowledge, your workspace."
 
     println!("Note added successfully!");
 
+    let notes = database::get_notes(&conn);
+
+    println!("NOTES RETRIVED: {:#?}", notes);
+
     Ok(())
 }
