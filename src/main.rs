@@ -8,7 +8,7 @@ Your productivity, your knowledge, your workspace."
 
     let conn = database::initialize()?;
 
-    println!("Database initialized successfully!");
+    println!("\nDatabase initialized successfully!");
 
     database::add_note(
         &conn,
@@ -16,11 +16,47 @@ Your productivity, your knowledge, your workspace."
         "Testing notes content",
     )?;
 
-    println!("Note added successfully!");
+    println!("\nNote added successfully!");
 
-    let notes = database::get_notes(&conn);
+    let notes = database::get_notes(&conn)?;
 
-    println!("NOTES RETRIVED: {:#?}", notes);
+    println!("\nNOTES RETRIEVED:");
+    for note in &notes {
+        println!("{:#?}", note);
+    }
+
+    if let Some(note) = notes.first() {
+        database::update_note(
+            &conn,
+            note.id,
+            "Updated First Note",
+            "This content has been updated!",
+        )?;
+
+        println!("\nNote updated successfully!");
+    }
+
+    let notes = database::get_notes(&conn)?;
+
+    println!("\nNOTES AFTER UPDATE:");
+    for note in &notes {
+        println!("{:#?}", note);
+    }
+
+    if let Some(note) = notes.first() {
+        database::delete_note(&conn, note.id)?;
+
+        println!("\nNote deleted successfully!");
+    }
+
+    let notes = database::get_notes(&conn)?;
+
+    println!("\nNOTES AFTER DELETE:");
+    for note in &notes {
+        println!("{:#?}", note);
+    }
+
+    println!("\nOPON database tests completed!");
 
     Ok(())
 }

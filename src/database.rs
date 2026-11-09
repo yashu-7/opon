@@ -34,21 +34,29 @@ pub fn initialize() -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn add_note(conn: &Connection, title: &str, content: &str) -> Result<()> {
+pub fn add_note(
+    conn: &Connection,
+    title: &str,
+    content: &str,
+) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
-    conn.execute("INSERT INTO notes (title, content, created_at, updated_at)
-                    VALUES (?1, ?2, ?3, ?4)",
-                    (title, content, &now, &now),)?;  
+    conn.execute(
+        "INSERT INTO notes (title, content, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        (title, content, &now, &now),
+    )?;
 
     Ok(())
 }
 
 pub fn get_notes(conn: &Connection) -> Result<Vec<Note>> {
-    let mut stmt = conn.prepare("SELECT id, title, content, created_at, updated_at
-                                                    FROM notes
-                                                    ORDER BY updated_at DESC")?;
-    
+    let mut stmt = conn.prepare(
+        "SELECT id, title, content, created_at, updated_at
+         FROM notes
+         ORDER BY updated_at DESC"
+    )?;
+
     let notes = stmt.query_map([], |row| {
         Ok(Note {
             id: row.get(0)?,
@@ -66,4 +74,41 @@ pub fn get_notes(conn: &Connection) -> Result<Vec<Note>> {
     }
 
     Ok(results)
+}
+
+pub fn update_note(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    content: &str,
+) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let rows_affected = conn.execute(
+        "UPDATE notes
+         SET title = ?1,
+             content = ?2,
+             updated_at = ?3
+         WHERE id = ?4",
+        (title, content, &now, id),
+    )?;
+
+    if rows_affected == 0 {
+        println!("No note found with ID: {}", id);
+    }
+
+    Ok(())
+}
+
+pub fn delete_note(conn: &Connection, id: i64) -> Result<()> {
+    let rows_affected = conn.execute(
+        "DELETE FROM notes WHERE id = ?1",
+        [id],
+    )?;
+
+    if rows_affected == 0 {
+        println!("No note found with ID: {}", id);
+    }
+
+    Ok(())
 }
