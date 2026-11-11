@@ -1,6 +1,9 @@
 mod database;
+mod repository;
 
-fn main() -> rusqlite::Result<()> {
+use repository::NoteRepository;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Welcome to OPON!
 Your productivity, your knowledge, your workspace."
@@ -10,48 +13,61 @@ Your productivity, your knowledge, your workspace."
 
     println!("\nDatabase initialized successfully!");
 
-    database::add_note(
-        &conn,
+    let repository = NoteRepository::new(conn);
+
+    // CREATE
+    let note_id = repository.add_note(
         "First Note",
         "Testing notes content",
     )?;
 
-    println!("\nNote added successfully!");
+    println!("\nNote added successfully! ID: {}", note_id);
 
-    let notes = database::get_notes(&conn)?;
+    // READ
+    let notes = repository.get_notes()?;
 
     println!("\nNOTES RETRIEVED:");
+
     for note in &notes {
         println!("{:#?}", note);
     }
 
-    if let Some(note) = notes.first() {
-        database::update_note(
-            &conn,
-            note.id,
-            "Updated First Note",
-            "This content has been updated!",
-        )?;
+    // UPDATE
+    let rows_updated = repository.update_note(
+        note_id,
+        "Updated First Note",
+        "This content has been updated!",
+    )?;
 
+    if rows_updated > 0 {
         println!("\nNote updated successfully!");
+    } else {
+        println!("\nNo note found with ID: {}", note_id);
     }
 
-    let notes = database::get_notes(&conn)?;
+    // READ AGAIN
+    let notes = repository.get_notes()?;
 
     println!("\nNOTES AFTER UPDATE:");
+
     for note in &notes {
         println!("{:#?}", note);
     }
 
-    if let Some(note) = notes.first() {
-        database::delete_note(&conn, note.id)?;
+    // DELETE
+    let rows_deleted = repository.delete_note(note_id)?;
 
+    if rows_deleted > 0 {
         println!("\nNote deleted successfully!");
+    } else {
+        println!("\nNo note found with ID: {}", note_id);
     }
 
-    let notes = database::get_notes(&conn)?;
+    // FINAL READ
+    let notes = repository.get_notes()?;
 
     println!("\nNOTES AFTER DELETE:");
+
     for note in &notes {
         println!("{:#?}", note);
     }
