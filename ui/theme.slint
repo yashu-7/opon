@@ -1,0 +1,15 @@
+export global Theme {
+    in property <bool> dark: true;
+    out property <color> canvas: dark ? #191919 : #ffffff;
+    out property <color> sidebar: dark ? #202020 : #f6f5f3;
+    out property <color> panel: dark ? #252525 : #f2f1ee;
+    out property <color> rule: dark ? #333332 : #e0ded9;
+    out property <color> hover: dark ? #2c2c2b : #eeebe6;
+    out property <color> selected: dark ? #333332 : #e7e4df;
+    out property <color> ink: dark ? #e7e6e3 : #232321;
+    out property <color> muted: dark ? #a4a29d : #605e59;
+    out property <color> accent: dark ? #8bbcf0 : #215e9e;
+    out property <color> selection: dark ? #375273 : #bddef8;
+    out property <color> error: dark ? #f3a6af : #972438;
+    out property <color> error-bg: dark ? #40282c : #fbe7e9;
+}

@@ -1,0 +1,571 @@
+import { AboutSlint, Button, ComboBox, LineEdit, Palette, ScrollView, TextEdit } from "std-widgets.slint";
+
+import { Theme } from "theme.slint";
+import { BlockAction, BlockChoice, BlockRow, BlockRowData } from "blocks.slint";
+export { BlockAction, BlockChoice, BlockRowData }
+
+export struct Entry {
+    id: string,
+    label: string,
+}
+
+export enum Action {
+    new-note, open-note, back, filter, search, edit, save, delete-note,
+    new-folder, move-note, configure, connect, connect-email, signup-email, connect-drive, disconnect, sync-now, theme
+}
+
+component SidebarRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback activated();
+    height: 34px;
+    border-radius: 6px;
+    background: self.selected ? Theme.selected : touch.has-hover || keys.has-focus ? Theme.hover : transparent;
+    accessible-role: button;
+    accessible-label: self.label;
+    accessible-action-default => { root.activated(); }
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.label;
+        overflow: elide;
+        vertical-alignment: center;
+        color: root.selected ? Theme.ink : Theme.muted;
+        font-weight: root.selected ? 650 : 450;
+        font-size: 14px;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "OPON";
+    icon: @image-url("../assets/opon.png");
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    min-width: root.mobile ? 280px : 650px;
+    min-height: root.mobile ? 200px : 480px;
+    background: Theme.canvas;
+    default-font-family: "Segoe UI";
+    default-font-size: 14px;
+
+    in property <[Entry]> notes;
+    in property <bool> mobile;
+    in property <bool> show-editor;
+    in property <[Entry]> folders;
+    in property <[string]> folder-options;
+    in property <string> selected-id;
+    in property <string> active-folder;
+    in property <string> location;
+    in-out property <int> folder-index;
+    in-out property <string> query;
+    in-out property <string> note-title;
+    in property <[BlockRowData]> blocks;
+    in property <string> code-font: "monospace";
+    in property <string> license-text;
+    in property <string> focus-block;
+    in property <int> focus-offset;
+    in property <int> focus-request;
+    callback block-action(BlockAction, int, string, int, int);
+    callback focus-first-block();
+    pure callback block-choices(string) -> [BlockChoice];
+    in property <string> status;
+    in property <bool> save-failed;
+    in property <bool> sync-configured;
+    in property <bool> sync-connected;
+    in property <bool> sync-busy;
+    in-out property <string> sync-status;
+    in property <bool> dark-mode: true;
+    in-out property <string> email;
+    in-out property <string> password;
+    in-out property <string> drive-client;
+    in-out property <string> drive-secret;
+    in property <bool> drive-available: true;
+    in property <string> sync-provider;
+    in-out property <bool> editing-sync;
+    in-out property <string> project-url;
+    in-out property <string> publishable-key;
+    in property <string> error-message;
+    private property <bool> show-drive;
+    private property <bool> show-license;
+    in-out property <bool> adding-folder;
+    in-out property <bool> confirming-delete;
+    in-out property <string> folder-name;
+    callback action(Action, string);
+    public function focus-title() { title-input.focus(); }
+    public function reset-page-scroll() { page-scroll.content-y = 0px; }
+
+    function apply-theme() {
+        Theme.dark = root.dark-mode;
+        Palette.color-scheme = root.dark-mode ? ColorScheme.dark : ColorScheme.light;
+    }
+    init => { root.apply-theme(); }
+    changed dark-mode => { root.apply-theme(); }
+
+    settings := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+
+        Rectangle {
+            width: min(460px, root.width - 26px);
+            height: min(590px, root.height - 24px);
+            background: Theme.canvas;
+            border-color: Theme.rule;
+            border-width: 1px;
+            border-radius: 10px;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 12px;
+                HorizontalLayout {
+                    height: 34px;
+                    Text { text: "Settings"; color: Theme.ink; font-size: 20px; font-weight: 700; vertical-alignment: center; }
+                    Button { text: "Done"; clicked => { settings.close(); } }
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    content-width: self.visible-width;
+                    content-height: preferences.preferred-height;
+                    preferences := VerticalLayout {
+                        width: parent.width;
+                        height: self.preferred-height;
+                        spacing: 9px;
+                        Text { text: "Appearance"; color: Theme.ink; font-weight: 650; }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            SidebarRow {
+                                label: "Light";
+                                selected: !root.dark-mode;
+                                activated => { root.action(Action.theme, "light"); }
+                            }
+                            SidebarRow {
+                                label: "Dark";
+                                selected: root.dark-mode;
+                                activated => { root.action(Action.theme, "dark"); }
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.rule; }
+                        Text { text: "Sync provider"; color: Theme.ink; font-weight: 650; }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            SidebarRow {
+                                label: "Supabase";
+                                selected: !root.show-drive;
+                                activated => { if !root.sync-busy && !root.sync-connected { root.show-drive = false; root.sync-status = ""; } }
+                            }
+                            SidebarRow {
+                                label: "Google Drive";
+                                selected: root.show-drive;
+                                activated => { if !root.sync-busy && !root.sync-connected { root.show-drive = true; root.sync-status = ""; } }
+                            }
+                        }
+
+                        if root.sync-status != "" : Text {
+                            text: root.sync-status;
+                            color: root.sync-connected ? Theme.muted : Theme.accent;
+                            wrap: word-wrap;
+                        }
+
+                        if root.sync-connected : HorizontalLayout {
+                            spacing: 6px;
+                            Button { text: "Sync now"; enabled: !root.sync-busy; clicked => { root.action(Action.sync-now, ""); } }
+                            Button { text: "Sign out"; enabled: !root.sync-busy; clicked => { root.action(Action.disconnect, ""); } }
+                        }
+
+                        if !root.sync-connected && !root.show-drive : VerticalLayout {
+                            spacing: 7px;
+                            if !root.sync-configured || root.editing-sync : VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Enter your Supabase project URL and publishable key.";
+                                    color: Theme.muted;
+                                    wrap: word-wrap;
+                                }
+                                LineEdit { text <=> root.project-url; placeholder-text: "Supabase project URL"; }
+                                LineEdit { text <=> root.publishable-key; placeholder-text: "Publishable key"; }
+                                Button { text: "Save project"; enabled: !root.sync-busy; clicked => { root.action(Action.configure, ""); } }
+                            }
+                            if root.sync-configured && !root.editing-sync : VerticalLayout {
+                                spacing: 6px;
+                                LineEdit { text <=> root.email; placeholder-text: "Email"; }
+                                LineEdit {
+                                    text <=> root.password;
+                                    placeholder-text: "Password";
+                                    input-type: InputType.password;
+                                    accepted => { if !root.sync-busy { root.action(Action.connect-email, ""); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Button { text: "Sign in"; enabled: !root.sync-busy; clicked => { root.action(Action.connect-email, ""); } }
+                                    Button { text: "Create account"; enabled: !root.sync-busy; clicked => { root.action(Action.signup-email, ""); } }
+                                }
+                                Rectangle { height: 1px; background: Theme.rule; }
+                                Button { text: "Google via Supabase"; enabled: !root.sync-busy; clicked => { root.action(Action.connect, ""); } }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Button { text: "Edit project"; enabled: !root.sync-busy; clicked => { root.editing-sync = true; } }
+                                    Button { text: "Google setup"; clicked => { Platform.open-url("https://supabase.com/docs/guides/auth/social-login/auth-google"); } }
+                                }
+                            }
+                        }
+
+                        if !root.sync-connected && root.show-drive : VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: root.drive-available
+                                    ? "Sync to a private folder in your Google Drive. No Supabase project needed."
+                                    : "This APK includes Supabase sync. The Google Drive option requires the Gradle Android build.";
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                            if !root.mobile : VerticalLayout {
+                                spacing: 6px;
+                                LineEdit { text <=> root.drive-client; placeholder-text: "Google Desktop OAuth client ID"; }
+                                LineEdit { text <=> root.drive-secret; placeholder-text: "Desktop OAuth client secret"; input-type: InputType.password; }
+                                Button { text: "Google Drive setup"; clicked => { Platform.open-url("https://developers.google.com/workspace/drive/api/quickstart/python"); } }
+                            }
+                            if root.drive-available : Button {
+                                text: "Connect Google Drive";
+                                enabled: !root.sync-busy;
+                                clicked => { root.action(Action.connect-drive, ""); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    about := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        Rectangle {
+            width: root.show-license && !root.mobile ? min(480px, root.width - 24px) : 272px;
+            height: root.show-license ? min(460px, root.height - 32px) : 168px;
+            background: Theme.panel;
+            border-color: Theme.rule;
+            border-width: 1px;
+            border-radius: 8px;
+            VerticalLayout {
+                padding: 12px;
+                Text {
+                    text: root.show-license ? "OPON · MIT License" : "About OPON";
+                    horizontal-alignment: center;
+                    font-weight: 700;
+                }
+                if !root.show-license : AboutSlint {}
+                if root.show-license : TextEdit { text: root.license-text; read-only: true; vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Button { text: root.show-license ? "Back" : "MIT license"; clicked => { root.show-license = !root.show-license; } }
+                    Button { text: "Close"; clicked => { about.close(); } }
+                }
+            }
+        }
+    }
+
+    FocusScope {
+        KeyBinding {
+            keys: @keys(Control + K);
+            activated => { search-input.focus(); }
+        }
+        KeyBinding {
+            keys: @keys(Control + S);
+            activated => { root.action(Action.save, ""); }
+        }
+
+        HorizontalLayout {
+            Rectangle {
+                visible: !root.mobile || !root.show-editor;
+                min-width: root.mobile ? 0px : 252px;
+                max-width: !root.mobile ? 252px : root.show-editor ? 0px : 5000px;
+                horizontal-stretch: root.mobile && !root.show-editor ? 1 : 0;
+                background: Theme.sidebar;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        height: 36px;
+                        Image {
+                            width: 31px;
+                            height: 31px;
+                            source: root.icon;
+                            accessible-role: none;
+                        }
+                        Text {
+                            text: "OPON";
+                            color: Theme.ink;
+                            font-size: 17px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    search-input := LineEdit {
+                        text <=> root.query;
+                        placeholder-text: root.mobile ? "Search pages" : "Search pages (Ctrl+K)";
+                        edited => { root.action(Action.search, ""); }
+                        key-pressed(event) => {
+                            if event.text == Key.Escape && root.query != "" {
+                                root.query = "";
+                                root.action(Action.search, "");
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                    Button { text: "+  New page"; clicked => { root.action(Action.new-note, ""); } }
+
+                    ScrollView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        content-width: self.visible-width;
+                        content-height: navigation.preferred-height;
+
+                        navigation := VerticalLayout {
+                            width: parent.width;
+                            height: self.preferred-height;
+                            spacing: 4px;
+
+                            SidebarRow {
+                                label: "All pages";
+                                selected: root.active-folder == "" && root.query == "";
+                                activated => { root.action(Action.filter, ""); }
+                            }
+                            HorizontalLayout {
+                                height: 38px;
+                                Text {
+                                    text: "Folders";
+                                    color: Theme.muted;
+                                    font-weight: 650;
+                                    vertical-alignment: center;
+                                }
+                                Button {
+                                    text: root.adding-folder ? "Cancel" : "+ Folder";
+                                    clicked => { root.adding-folder = !root.adding-folder; }
+                                }
+                            }
+                            if root.adding-folder : HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    placeholder-text: "Folder name";
+                                    text <=> root.folder-name;
+                                    accepted => { root.action(Action.new-folder, self.text); }
+                                }
+                                Button {
+                                    text: "Add";
+                                    enabled: root.folder-name != "";
+                                    clicked => { root.action(Action.new-folder, root.folder-name); }
+                                }
+                            }
+                            for folder in root.folders : SidebarRow {
+                                label: folder.label;
+                                selected: root.active-folder == folder.id && root.query == "";
+                                activated => { root.action(Action.filter, folder.id); }
+                            }
+                            Text {
+                                height: 34px;
+                                text: root.query == "" ? "Pages" : "Search results";
+                                color: Theme.muted;
+                                font-weight: 650;
+                                vertical-alignment: center;
+                            }
+                            for note in root.notes : SidebarRow {
+                                label: note.label;
+                                selected: root.selected-id == note.id;
+                                activated => { root.action(Action.open-note, note.id); }
+                            }
+                            if root.notes.length == 0 : Text {
+                                text: root.query == "" ? "No pages yet" : "No matching notes";
+                                color: Theme.muted;
+                                height: 26px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    SidebarRow {
+                        label: root.sync-connected ? "Settings · " + root.sync-provider : "Settings";
+                        activated => {
+                            root.show-drive = root.sync-provider == "Google Drive" || root.show-drive;
+                            settings.show();
+                        }
+                    }
+                    SidebarRow { label: "About OPON"; activated => { root.show-license = false; about.show(); } }
+                }
+            }
+            if !root.mobile : Rectangle { width: 1px; background: Theme.rule; }
+
+            VerticalLayout {
+                visible: !root.mobile || root.show-editor;
+                min-width: 0px;
+                max-width: root.mobile && !root.show-editor ? 0px : 5000px;
+                horizontal-stretch: !root.mobile || root.show-editor ? 1 : 0;
+                HorizontalLayout {
+                    height: root.mobile ? 52px : 60px;
+                    padding-left: root.mobile ? 12px : 24px;
+                    padding-right: root.mobile ? 12px : 24px;
+                    padding-top: root.mobile ? 6px : 12px;
+                    padding-bottom: root.mobile ? 6px : 12px;
+                    spacing: 8px;
+                    if root.mobile : Button { text: "Pages"; clicked => { root.action(Action.back, ""); } }
+                    if root.selected-id != "" && (!root.mobile || !root.confirming-delete) : ComboBox {
+                        width: root.mobile ? 100px : 152px;
+                        model: root.folder-options;
+                        current-index <=> root.folder-index;
+                        selected => { root.action(Action.move-note, ""); }
+                    }
+                    if !root.mobile : Text {
+                        text: root.status;
+                        color: root.save-failed ? Theme.error : Theme.muted;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    if root.mobile : Rectangle { horizontal-stretch: 1; }
+                    if !root.mobile && root.save-failed : Button { text: "Retry save"; clicked => { root.action(Action.save, ""); } }
+                    if root.selected-id != "" : Button {
+                        text: root.confirming-delete ? "Confirm delete" : "Delete";
+                        clicked => {
+                            if root.confirming-delete {
+                                root.action(Action.delete-note, "");
+                            } else {
+                                root.confirming-delete = true;
+                            }
+                        }
+                    }
+                    if root.confirming-delete : Button { text: "Cancel"; clicked => { root.confirming-delete = false; } }
+                }
+                if root.mobile && root.status != "" : HorizontalLayout {
+                    height: 28px;
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    Text {
+                        color: root.save-failed ? Theme.error : Theme.muted;
+                        text: root.status;
+                        vertical-alignment: center;
+                    }
+                    if root.save-failed : Button { text: "Retry"; clicked => { root.action(Action.save, ""); } }
+                }
+                if root.error-message != "" : Rectangle {
+                    height: error-text.preferred-height + 16px;
+                    background: Theme.error-bg;
+                    error-text := Text {
+                        x: 24px;
+                        width: parent.width - 48px;
+                        text: root.error-message;
+                        color: Theme.error;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                    }
+                }
+                page-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    content-width: self.visible-width;
+                    content-height: max(self.visible-height, page.preferred-height);
+                    page := VerticalLayout {
+                        x: (parent.width - self.width) / 2;
+                        y: 0px;
+                        width: min(parent.width - (root.mobile ? 16px : 56px), 744px);
+                        height: self.preferred-height;
+                        padding-top: root.mobile ? 14px : 46px;
+                        padding-bottom: root.mobile ? 48px : 96px;
+                        spacing: 3px;
+
+                        if root.selected-id == "" : Text {
+                            height: 80px;
+                            text: "Choose a page or create a new one";
+                            color: Theme.muted;
+                            font-size: 19px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.selected-id != "" : Text {
+                            x: 50px;
+                            height: 24px;
+                            text: root.location;
+                            color: Theme.muted;
+                        }
+                        Rectangle {
+                            visible: root.selected-id != "";
+                            height: root.selected-id == "" ? 0px : max(root.mobile ? 54px : 69px, title-metrics.preferred-height + 18px);
+                            title-metrics := Text {
+                                visible: false;
+                                width: title-input.width;
+                                text: root.note-title + " ";
+                                wrap: word-wrap;
+                                font-size: title-input.font-size;
+                                font-weight: title-input.font-weight;
+                            }
+                            Text {
+                                x: 50px;
+                                width: parent.width - self.x;
+                                visible: root.note-title == "" && !title-input.has-focus;
+                                text: "Untitled";
+                                color: Theme.muted;
+                                font-size: root.mobile ? 30px : 44px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            title-input := TextInput {
+                                x: 50px;
+                                width: parent.width - self.x;
+                                single-line: false;
+                                wrap: word-wrap;
+                                text <=> root.note-title;
+                                vertical-alignment: center;
+                                font-size: root.mobile ? 30px : 44px;
+                                font-weight: 700;
+                                color: Theme.ink;
+                                accessible-label: "Page title";
+                                key-pressed(event) => {
+                                    if event.text == Key.Return {
+                                        root.focus-first-block();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                                edited => { root.action(Action.edit, ""); }
+                            }
+                        }
+                        for block[index] in root.blocks : BlockRow {
+                            data: block;
+                            first: index == 0;
+                            last: index + 1 == root.blocks.length;
+                            focus-request: root.focus-block == block.id ? root.focus-request : 0;
+                            focus-offset: root.focus-offset;
+                            code-font: root.code-font;
+                            find-choices(query) => { root.block-choices(query) }
+                            command(action, value, anchor, cursor) => {
+                                root.block-action(action, index, value, anchor, cursor);
+                            }
+                            reveal(top, span) => {
+                                if top + span > -page-scroll.content-y + page-scroll.visible-height {
+                                    page-scroll.content-y = min(0px, page-scroll.visible-height - top - span - 8px);
+                                } else if top < -page-scroll.content-y {
+                                    page-scroll.content-y = min(0px, 8px - top);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

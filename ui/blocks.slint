@@ -1,0 +1,266 @@
+import { Button, LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct BlockRowData {
+    id: string,
+    kind: string,
+    text: string,
+    checked: bool,
+    number: int,
+}
+
+export struct BlockChoice {
+    kind: string,
+    label: string,
+    glyph: string,
+}
+
+export enum BlockAction { edit, split, join, insert, convert, duplicate, move-up, move-down, delete, toggle }
+
+component MenuRow inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <bool> selected;
+    callback activate();
+    height: 32px;
+    border-radius: 4px;
+    background: selected || hit.has-hover ? Theme.hover : transparent;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.activate(); }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text { width: 24px; text: root.glyph; color: root.selected ? Theme.accent : Theme.muted; vertical-alignment: center; }
+        Text { text: root.label; color: Theme.ink; vertical-alignment: center; }
+    }
+    hit := TouchArea { mouse-cursor: pointer; clicked => { root.activate(); } }
+}
+
+export component BlockRow inherits Rectangle {
+    in property <BlockRowData> data;
+    in property <int> focus-request;
+    in property <int> focus-offset;
+    in property <string> code-font;
+    in property <bool> first;
+    in property <bool> last;
+    callback command(BlockAction, string, int, int);
+    callback reveal(length, length);
+    pure callback find-choices(string) -> [BlockChoice];
+
+    private property <bool> is-heading: data.kind == "heading" || data.kind == "subheading";
+    private property <bool> is-divider: data.kind == "divider";
+    private property <bool> is-code: data.kind == "code";
+    private property <length> font-size: data.kind == "heading" ? 28px : data.kind == "subheading" ? 22px : is-code ? 14px : 16px;
+    private property <string> font-family: is-code ? code-font : "";
+    private property <bool> show-actions;
+    private property <string> filter;
+    private property <int> highlighted;
+    private property <[BlockChoice]> choices: root.find-choices(filter);
+    height: is-divider ? 32px : max(32px, metrics.preferred-height + (is-code ? 20px : 8px));
+
+    function request-focus() {
+        if root.focus-request != 0 && !root.is-divider {
+            input.focus();
+            input.set-selection-offsets(root.focus-offset, root.focus-offset);
+            root.reveal(root.y, root.height);
+        }
+    }
+    init => { root.request-focus(); }
+    changed focus-request => { root.request-focus(); }
+
+    function open-menu(actions: bool) {
+        root.show-actions = actions;
+        root.filter = "";
+        root.highlighted = 0;
+        menu.show();
+    }
+    function close-menu() {
+        menu.close();
+    }
+
+    menu := PopupWindow {
+        x: 21px;
+        y: 30px;
+        Rectangle {
+            width: 250px;
+            height: menu-items.preferred-height;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.rule;
+            background: Theme.panel;
+            menu-items := VerticalLayout {
+                padding: 7px;
+                spacing: 2px;
+                menu-search := LineEdit {
+                    init => { self.focus(); }
+                    placeholder-text: "Find a block type";
+                    text <=> root.filter;
+                    edited => { root.highlighted = 0; root.show-actions = false; }
+                    accepted => {
+                        if root.choices.length > 0 {
+                            root.close-menu();
+                            input.focus();
+                            root.command(BlockAction.convert, root.choices[root.highlighted].kind, 0, 0);
+                        }
+                    }
+                    key-pressed(event) => {
+                        if event.text == Key.Escape {
+                            root.close-menu();
+                            input.focus();
+                            return accept;
+                        }
+                        if event.text == Key.DownArrow {
+                            root.highlighted = min(root.highlighted + 1, max(0, root.choices.length - 1));
+                            return accept;
+                        }
+                        if event.text == Key.UpArrow {
+                            root.highlighted = max(0, root.highlighted - 1);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+                for choice[index] in root.choices : MenuRow {
+                    glyph: choice.glyph;
+                    label: choice.label;
+                    selected: index == root.highlighted;
+                    activate => {
+                        root.close-menu();
+                        input.focus();
+                        root.command(BlockAction.convert, choice.kind, 0, 0);
+                    }
+                }
+                if root.choices.length == 0 : Text {
+                    text: "No matching block types";
+                    color: Theme.muted;
+                    height: 32px;
+                    vertical-alignment: center;
+                }
+                if root.show-actions : Rectangle { height: 1px; background: Theme.rule; }
+                if root.show-actions && !root.first : MenuRow {
+                    glyph: "↑"; label: "Move up";
+                    activate => { root.close-menu(); root.command(BlockAction.move-up, "", 0, 0); }
+                }
+                if root.show-actions && !root.last : MenuRow {
+                    glyph: "↓"; label: "Move down";
+                    activate => { root.close-menu(); root.command(BlockAction.move-down, "", 0, 0); }
+                }
+                if root.show-actions : MenuRow {
+                    glyph: "⧉"; label: "Duplicate";
+                    activate => { root.close-menu(); root.command(BlockAction.duplicate, "", 0, 0); }
+                }
+                if root.show-actions : MenuRow {
+                    glyph: "×"; label: "Delete block";
+                    activate => { root.close-menu(); root.command(BlockAction.delete, "", 0, 0); }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 1px;
+        MenuRow {
+            width: 24px;
+            glyph: "+";
+            accessible-label: "Insert block below";
+            activate => { root.command(BlockAction.insert, "", 0, 0); }
+        }
+        MenuRow {
+            width: 24px;
+            glyph: "...";
+            accessible-label: "Block actions";
+            activate => { root.open-menu(true); }
+        }
+        if root.data.kind == "bullet" || root.data.kind == "number": Text {
+            width: 24px;
+            height: 28px;
+            text: root.data.kind == "bullet" ? "•" : "\{root.data.number}.";
+            color: Theme.ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if root.data.kind == "todo": MenuRow {
+            width: 27px;
+            glyph: root.data.checked ? "☑" : "☐";
+            accessible-role: checkbox;
+            accessible-label: "Task";
+            accessible-checked: root.data.checked;
+            activate => { root.command(BlockAction.toggle, "", 0, 0); }
+        }
+        if root.data.kind == "quote": Rectangle {
+            width: 3px;
+            background: Theme.muted;
+            border-radius: 1px;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 5px;
+            background: root.is-code ? Theme.panel : transparent;
+            Rectangle {
+                visible: root.is-divider;
+                height: 1px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.rule;
+            }
+            metrics := Text {
+                visible: false;
+                width: input.width;
+                text: input.text + " ";
+                wrap: word-wrap;
+                font-size: root.font-size;
+                font-family: root.font-family;
+                font-weight: root.is-heading ? 700 : 400;
+            }
+            if root.data.text == "" && !root.is-divider && root.last: Text {
+                x: input.x; y: input.y; height: input.height; width: input.width;
+                text: root.is-code ? "Code" : "Type / for commands";
+                color: Theme.muted;
+                font-size: root.font-size;
+                font-family: root.font-family;
+            }
+            input := TextInput {
+                visible: !root.is-divider;
+                enabled: !root.is-divider;
+                x: root.is-code || root.data.kind == "quote" ? 9px : 2px;
+                width: parent.width - 2 * self.x;
+                y: root.is-code ? 10px : 4px;
+                height: parent.height - 2 * self.y;
+                text: root.data.text;
+                single-line: false;
+                wrap: word-wrap;
+                font-size: root.font-size;
+                font-family: root.font-family;
+                font-weight: root.is-heading ? 700 : 400;
+                color: root.data.checked ? Theme.muted : Theme.ink;
+                selection-background-color: Theme.selection;
+                selection-foreground-color: Theme.ink;
+                accessible-label: root.is-heading ? "Heading block" : root.is-code ? "Code block" : "Text block";
+                edited => {
+                    if self.text == "/" && root.data.text == "" && !root.is-code {
+                        self.text = "";
+                        root.open-menu(false);
+                    } else {
+                        root.command(BlockAction.edit, self.text, 0, 0);
+                    }
+                }
+                key-pressed(event) => {
+                    if event.text == Key.Return && (!root.is-code || event.modifiers.control) && !event.modifiers.shift {
+                        root.command(BlockAction.split, "", self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                        return accept;
+                    }
+                    if event.text == Key.Backspace && !root.first &&
+                        self.anchor-position-byte-offset == 0 && self.cursor-position-byte-offset == 0 {
+                        root.command(self.text == "" ? BlockAction.delete : BlockAction.join, "", 0, 0);
+                        return accept;
+                    }
+                    return reject;
+                }
+                cursor-position-changed(position) => {
+                    root.reveal(root.y + self.y + position.y, 28px);
+                }
+            }
+        }
+    }
+}

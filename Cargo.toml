@@ -1,8 +1,56 @@
 [package]
 name = "opon"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
+license = "MIT"
+
+[lib]
+name = "opon_app"
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ureq = { version = "3", features = ["json"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+webbrowser = "1"
 chrono = "0.4.45"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "accessibility"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "renderer-software"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fontique = { version = "0.11.1", default-features = false, features = ["fontconfig-dlopen"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18.1", default-features = false, features = ["backend-android-activity-06"] }
+jni = "0.22.4"
+ndk-context = "0.1.1"
+
+[package.metadata.android]
+package = "io.github.yashu7.opon"
+build_targets = ["aarch64-linux-android"]
+resources = "assets/android"
+
+[package.metadata.android.application]
+label = "OPON"
+icon = "@mipmap/opon"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 36
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[build-dependencies]
+slint-build = "1.18.1"
+winresource = "0.1"
+
+[profile.release]
+strip = "symbols"
